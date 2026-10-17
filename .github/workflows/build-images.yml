@@ -1,0 +1,65 @@
+name: Build Application Images
+
+on:
+  push:
+    branches:
+      - devsecops/github-actions
+      - main
+    paths:
+      - backend/**
+      - frontend/**
+      - .github/workflows/build-images.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wanderlust-image-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, wanderlust]
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check Docker and disk space
+        run: |
+          docker version
+          df -h /
+
+      - name: Build backend image
+        run: |
+          docker build --pull --progress=plain \
+            --tag "wanderlust-backend:${GITHUB_SHA}" \
+            ./backend
+
+      - name: Build frontend image
+        run: |
+          docker build --pull --progress=plain \
+            --tag "wanderlust-frontend:${GITHUB_SHA}" \
+            ./frontend
+
+      - name: Record build results
+        run: |
+          {
+            echo "## Application images built"
+            echo ""
+            echo "Commit: ${GITHUB_SHA}"
+            echo ""
+            echo '```text'
+            docker image inspect \
+              "wanderlust-backend:${GITHUB_SHA}" \
+              "wanderlust-frontend:${GITHUB_SHA}" \
+              --format '{{.RepoTags}} | user={{.Config.User}} | size={{.Size}} bytes'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
