@@ -1,32 +1,18 @@
-# ------------------- Stage 1: Build Stage ------------------------------
-FROM node:21 AS frontend-builder
+FROM node:22-bookworm-slim AS build
 
-# Set the working directory to /app
 WORKDIR /app
 
-# Copy the package.json and package-lock.json for dependency installation
-COPY package*.json ./
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# Install dependencies
-RUN npm install
-
-# Copy the rest of the application code
 COPY . .
 
-# ------------------- Stage 2: Final Stage ------------------------------
-FROM node:21-slim
+ENV VITE_API_PATH=""
+RUN npm run build
 
-# Set the working directory to /app
-WORKDIR /app
+FROM nginxinc/nginx-unprivileged:stable-alpine AS runtime
 
-# Copy built assets and dependencies from frontend-builder stage
-COPY --from=frontend-builder /app .
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy the .env.sample file to .env.local
-COPY .env.docker .env.local
-
-# Expose port 5173 for the Node.js application
-EXPOSE 5173
-
-# Define the default command to run the application in development mode
-CMD ["npm", "run", "dev", "--", "--host"]
+EXPOSE 8080
