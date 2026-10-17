@@ -1,0 +1,52 @@
+name: Verify EC2 Runner
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, wanderlust]
+    timeout-minutes: 5
+
+    env:
+      AWS_REGION: ap-southeast-2
+      AWS_DEFAULT_REGION: ap-southeast-2
+      AWS_PAGER: ""
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Verify runner user and Docker
+        run: |
+          whoami
+          id -nG
+          docker version
+          docker ps
+          docker buildx version
+
+      - name: Verify AWS CLI and expected role
+        run: |
+          aws --version
+
+          ROLE_ARN=$(aws sts get-caller-identity \
+            --query Arn --output text)
+
+          case "$ROLE_ARN" in
+            arn:aws:sts::*:assumed-role/wanderlust-runner-role/*)
+              echo "Expected EC2 IAM role verified."
+              ;;
+            *)
+              echo "::error::Runner is not using wanderlust-runner-role."
+              exit 1
+              ;;
+          esac
+
+      - name: Verify ECR token permission
+        run: |
+          aws ecr get-login-password > /dev/null
+          echo "ECR authentication token request successful."
