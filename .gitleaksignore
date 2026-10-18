@@ -1,0 +1,4 @@
+# Inherited upstream JWT secret; removed from current configuration.
+# Not approved for reuse. Upstream revocation status is unknown.
+# Exception applies only to this exact historical finding.
+1c8d453834c62ac2fcd791531941da5eef9c27ca:backend/.env.docker:generic-api-key:9

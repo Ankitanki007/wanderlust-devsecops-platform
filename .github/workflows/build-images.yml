@@ -52,6 +52,7 @@ jobs:
             -v "$REPORT_DIR:/reports" \
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
             git /repo \
+            --gitleaks-ignore-path=/repo/.gitleaksignore \
             --log-opts="--all" \
             --redact=100 \
             --report-format=json \
