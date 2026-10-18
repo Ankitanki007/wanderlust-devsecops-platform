@@ -1,24 +1,18 @@
-FROM node:22-bookworm-slim
-
-ENV NODE_ENV=production
+FROM node:22-bookworm-slim AS dependencies
 
 WORKDIR /app
-
 COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && rm -rf /var/lib/apt/lists/*
+FROM gcr.io/distroless/nodejs22-debian13:nonroot AS runtime
 
-RUN npm ci --omit=dev \
-    && npm cache clean --force \
-    && rm -rf /usr/local/lib/node_modules/npm \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx
+ENV NODE_ENV=production
+WORKDIR /app
 
-COPY --chown=node:node . .
+COPY --chown=65532:65532 . .
+COPY --from=dependencies --chown=65532:65532 /app/node_modules ./node_modules
 
-USER node
-
+USER 65532:65532
 EXPOSE 8080
 
-CMD ["node", "server.js"]
+CMD ["server.js"]
