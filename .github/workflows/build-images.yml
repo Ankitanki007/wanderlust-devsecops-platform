@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, linux, x64, wanderlust]
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -148,6 +148,68 @@ jobs:
           docker build --pull --progress=plain \
             --tag "wanderlust-frontend:${GITHUB_SHA}" \
             ./frontend
+
+      - name: Scan container images with Trivy
+        id: trivy
+        timeout-minutes: 25
+        run: |
+          REPORT_DIR="$RUNNER_TEMP/trivy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$REPORT_DIR/cache"
+          trap 'rm -f "$REPORT_DIR/image.tar"' EXIT
+
+          docker pull aquasec/trivy:0.76.0
+
+          scan_failed=0
+
+          for app in backend frontend; do
+            echo "::group::Trivy scan - $app"
+
+            if ! docker save \
+              --output "$REPORT_DIR/image.tar" \
+              "wanderlust-$app:$GITHUB_SHA"; then
+              scan_failed=1
+              echo "::error::Could not export $app image."
+              echo "::endgroup::"
+              continue
+            fi
+
+            if docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -e HOME=/tmp \
+              -v "$REPORT_DIR:/scan" \
+              aquasec/trivy:0.76.0 \
+              image \
+              --input /scan/image.tar \
+              --cache-dir /scan/cache \
+              --scanners vuln \
+              --severity HIGH,CRITICAL \
+              --format json \
+              --output "/scan/$app-trivy.json" \
+              --exit-code 1 \
+              --timeout 10m \
+              --no-progress; then
+              echo "$app: Trivy scan passed."
+            else
+              scan_failed=1
+              echo "::error::$app Trivy scan failed. Check findings and scanner logs."
+            fi
+
+            rm -f "$REPORT_DIR/image.tar"
+            echo "::endgroup::"
+          done
+
+          exit "$scan_failed"
+
+      - name: Upload Trivy reports
+        if: ${{ always() && steps.trivy.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: trivy-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trivy-${{ github.run_id }}-${{ github.run_attempt }}/*-trivy.json
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Record build results
         run: |
