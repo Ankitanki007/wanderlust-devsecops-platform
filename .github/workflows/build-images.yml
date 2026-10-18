@@ -67,6 +67,55 @@ jobs:
           path: ${{ runner.temp }}/gitleaks-${{ github.run_id }}-${{ github.run_attempt }}/gitleaks-report.json
           retention-days: 7
           if-no-files-found: warn
+      - name: Audit npm dependencies
+        id: npm_audit
+        run: |
+          REPORT_DIR="$RUNNER_TEMP/npm-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$REPORT_DIR"
+
+          docker pull node:22-bookworm-slim
+
+          audit_failed=0
+
+          for app in backend frontend; do
+            echo "::group::Dependency audit - $app"
+
+            if docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -e HOME=/tmp \
+              -e npm_config_cache=/tmp/npm-cache \
+              -v "$GITHUB_WORKSPACE/$app:/app:ro" \
+              -w /app \
+              node:22-bookworm-slim \
+              npm audit \
+                --package-lock-only \
+                --include=dev \
+                --ignore-scripts \
+                --audit-level=high \
+                --json \
+                > "$REPORT_DIR/$app-audit.json"; then
+              echo "$app: dependency audit passed."
+            else
+              audit_failed=1
+              echo "::error::$app dependency audit failed. Inspect the report for vulnerabilities or registry errors."
+            fi
+
+            cat "$REPORT_DIR/$app-audit.json"
+            echo "::endgroup::"
+          done
+
+          exit "$audit_failed"
+
+      - name: Upload npm audit reports
+        if: ${{ always() && steps.npm_audit.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: npm-audit-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/npm-audit-${{ github.run_id }}-${{ github.run_attempt }}/*-audit.json
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Build backend image
         run: |
