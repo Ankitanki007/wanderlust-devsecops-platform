@@ -61,7 +61,7 @@ jobs:
 
       - name: Upload redacted Gitleaks report
         if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gitleaks-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/gitleaks-${{ github.run_id }}-${{ github.run_attempt }}/gitleaks-report.json
