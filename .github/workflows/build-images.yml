@@ -211,6 +211,171 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      - name: Runtime smoke test
+        id: runtime_smoke
+        timeout-minutes: 10
+        run: |
+          set -Eeuo pipefail
+          PREFIX="wl-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          IMAGE="wanderlust-backend:${GITHUB_SHA}"
+
+          cleanup() {
+            status=$?
+            trap - EXIT
+            set +e
+            if [ "$status" -ne 0 ]; then
+              for service in mongo redis backend frontend; do
+                echo "::group::Smoke logs - $service"
+                docker logs --tail 80 "$PREFIX-$service" 2>&1
+                echo "::endgroup::"
+              done
+            fi
+            for service in probe frontend backend redis mongo; do
+              docker rm -fv "$PREFIX-$service" >/dev/null 2>&1
+            done
+            docker network rm "$PREFIX" >/dev/null 2>&1
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          docker pull mongo:7
+          docker pull redis:7-alpine
+          docker network create --internal "$PREFIX"
+
+          docker run -d --name "$PREFIX-mongo" \
+            --network "$PREFIX" --network-alias mongo mongo:7
+
+          docker run -d --name "$PREFIX-redis" \
+            --network "$PREFIX" --network-alias redis \
+            redis:7-alpine redis-server --save "" --appendonly no
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if docker exec "$PREFIX-mongo" mongosh --quiet \
+                --eval 'quit(db.adminCommand({ping:1}).ok === 1 ? 0 : 1)' \
+                >/dev/null 2>&1 \
+              && [ "$(docker exec "$PREFIX-redis" redis-cli ping 2>/dev/null)" = "PONG" ]; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1 || { echo "::error::Test databases not ready"; exit 1; }
+
+          docker run -d --name "$PREFIX-backend" \
+            --network "$PREFIX" --network-alias backend \
+            --cap-drop ALL --security-opt no-new-privileges \
+            -e PORT=8080 \
+            -e MONGODB_URI=mongodb://mongo:27017/wanderlust_smoke \
+            -e REDIS_URL=redis://redis:6379 \
+            "$IMAGE"
+
+          docker run -d --name "$PREFIX-frontend" \
+            --network "$PREFIX" --network-alias frontend \
+            --cap-drop ALL --security-opt no-new-privileges \
+            "wanderlust-frontend:${GITHUB_SHA}"
+
+          docker run --rm -i --name "$PREFIX-probe" \
+            --network "$PREFIX" \
+            --cap-drop ALL --security-opt no-new-privileges \
+            "$IMAGE" --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import { setTimeout as delay } from 'node:timers/promises';
+          import { createClient } from 'redis';
+          import { REDIS_PREFIX, REDIS_KEYS } from './utils/constants.js';
+
+          const deadline = setTimeout(() => {
+            console.error('FAIL: Smoke test exceeded 180 seconds');
+            process.exit(1);
+          }, 180000);
+
+          async function get(url) {
+            const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+            assert.equal(response.status, 200, `${url}: expected HTTP 200`);
+            return response;
+          }
+
+          async function check(name, fn) {
+            let lastError;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              try {
+                await fn();
+                console.log(`PASS: ${name}`);
+                return;
+              } catch (error) {
+                lastError = error;
+                await delay(1000);
+              }
+            }
+            throw new Error(`${name}: ${lastError?.message}`);
+          }
+
+          let redis;
+          try {
+            await check('Backend startup', async () => {
+              assert.match(await (await get('http://backend:8080/')).text(),
+                /Backend of wanderlust/);
+            });
+
+            await check('MongoDB-backed posts API', async () => {
+              assert.deepEqual(await (await get('http://backend:8080/api/posts')).json(), []);
+            });
+
+            await check('Frontend health endpoint', async () => {
+              assert.equal((await (await get('http://frontend:8080/healthz')).text()).trim(), 'ok');
+            });
+
+            await check('Frontend HTML', async () => {
+              const response = await get('http://frontend:8080/');
+              assert.match(response.headers.get('content-type') || '', /text\/html/);
+              assert.match(await response.text(), /<html[\s>]/i);
+            });
+
+            await check('Nginx API proxy', async () => {
+              assert.deepEqual(await (await get('http://frontend:8080/api/posts')).json(), []);
+            });
+
+            redis = createClient({
+              url: 'redis://redis:6379',
+              socket: { connectTimeout: 5000, reconnectStrategy: false }
+            });
+            redis.on('error', error => console.error('Redis probe:', error.message));
+            await redis.connect();
+
+            await check('Application populates Redis cache', async () => {
+              assert.deepEqual(await (await get('http://backend:8080/api/posts')).json(), []);
+              const cached = await redis.get(`${REDIS_PREFIX}:${REDIS_KEYS.ALL_POSTS}`);
+              assert.notEqual(cached, null, 'Posts cache key missing');
+              assert.deepEqual(JSON.parse(cached), []);
+            });
+          } catch (error) {
+            console.error(`FAIL: ${error.message}`);
+            process.exitCode = 1;
+          } finally {
+            if (redis?.isOpen) await redis.disconnect();
+            clearTimeout(deadline);
+          }
+          JS
+
+          for service in backend frontend; do
+            test "$(docker inspect --format '{{.State.Running}}' "$PREFIX-$service")" = "true"
+          done
+          echo "Runtime smoke test passed." >> "$GITHUB_STEP_SUMMARY"
+
+
+      - name: Cleanup smoke test resources
+        if: ${{ always() && steps.runtime_smoke.outcome != 'skipped' }}
+        run: |
+          PREFIX="wl-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for service in probe frontend backend redis mongo; do
+            if docker container inspect "$PREFIX-$service" >/dev/null 2>&1; then
+              docker rm -fv "$PREFIX-$service"
+            fi
+          done
+          if docker network inspect "$PREFIX" >/dev/null 2>&1; then
+            docker network rm "$PREFIX"
+          fi
+
       - name: Record build results
         run: |
           {
