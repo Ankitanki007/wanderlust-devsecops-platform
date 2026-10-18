@@ -137,6 +137,39 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      - name: Check SonarQube connection
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$SONAR_TOKEN" || {
+            echo "::error::SONAR_TOKEN is missing"
+            exit 1
+          }
+          test -n "$SONAR_HOST_URL" || {
+            echo "::error::SONAR_HOST_URL is missing"
+            exit 1
+          }
+          curl --fail --silent --show-error --max-time 15 \
+            "${SONAR_HOST_URL%/}/api/system/status" |
+            python3 -c 'import json,sys; data=json.load(sys.stdin); print("SonarQube status:", data.get("status")); sys.exit(0 if data.get("status") == "UP" else 1)'
+          free -h
+
+      - name: SonarQube analysis and Quality Gate
+        id: sonar_scan
+        timeout-minutes: 20
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_SCANNER_JAVA_OPTS: "-Xmx512m"
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=600
+            -Dsonar.javascript.node.maxspace=512
+
       - name: Build backend image
         run: |
           docker build --pull --progress=plain \
