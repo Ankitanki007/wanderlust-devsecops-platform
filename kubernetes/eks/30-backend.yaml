@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: wanderlust
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: wanderlust
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: 895196059533.dkr.ecr.ap-southeast-2.amazonaws.com/wanderlust-backend@sha256:ebca49c44ff2f28cce541f99a960baf26781fec2842a517b40b6e8a029925b3a
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: NODE_ENV
+              value: production
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-auth
+                  key: mongodb-uri
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-auth
+                  key: JWT_SECRET
+            - name: ACCESS_TOKEN_EXPIRES_IN
+              value: "15m"
+            - name: REFRESH_TOKEN_EXPIRES_IN
+              value: "7d"
+            - name: ACCESS_COOKIE_MAXAGE
+              value: "900000"
+            - name: REFRESH_COOKIE_MAXAGE
+              value: "604800000"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/posts
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 20
+            timeoutSeconds: 3

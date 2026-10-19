@@ -477,6 +477,11 @@ jobs:
 
           echo "Both images published and verified in ECR."
 
+      - name: Deploy verified images to EKS
+        if: ${{ success() && steps.ecr_push.outcome == 'success' }}
+        timeout-minutes: 15
+        run: bash scripts/deploy/eks.sh
+
       - name: Record build results
         run: |
           {

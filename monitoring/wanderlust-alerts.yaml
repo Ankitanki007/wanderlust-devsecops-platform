@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: wanderlust-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: wanderlust.availability
+      rules:
+        - alert: WanderlustDeploymentUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{
+              namespace="wanderlust",
+              deployment=~"backend|frontend|mongo|redis"
+            } < 1
+          for: 2m
+          labels:
+            severity: critical
+            project: wanderlust
+          annotations:
+            summary: 'Wanderlust deployment {{ $labels.deployment }} unavailable'
+            description: 'Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has had zero available replicas for at least 2 minutes.'
