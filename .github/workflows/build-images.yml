@@ -409,6 +409,74 @@ jobs:
             docker network rm "$PREFIX"
           fi
 
+      - name: Push verified images to Amazon ECR
+        id: ecr_push
+        if: ${{ success() && steps.sonar_scan.outcome == 'success' && steps.trivy.outcome == 'success' && steps.runtime_smoke.outcome == 'success' }}
+        timeout-minutes: 15
+        env:
+          AWS_REGION: ap-southeast-2
+          AWS_PAGER: ""
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]] || {
+            echo "::error::Invalid AWS account ID"
+            exit 1
+          }
+
+          REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          IMAGE_TAG="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          export DOCKER_CONFIG
+          DOCKER_CONFIG="$(mktemp -d "$RUNNER_TEMP/wl-ecr-auth.XXXXXX")"
+          trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+
+          # Confirm both repositories and local images before publishing.
+          aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --repository-names wanderlust-backend wanderlust-frontend \
+            --query 'repositories[].repositoryName' --output text
+
+          docker image inspect \
+            "wanderlust-backend:${GITHUB_SHA}" \
+            "wanderlust-frontend:${GITHUB_SHA}" >/dev/null
+
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$REGISTRY"
+
+          echo "## Published ECR images" >> "$GITHUB_STEP_SUMMARY"
+
+          for app in backend frontend; do
+            REPOSITORY="wanderlust-$app"
+            REMOTE_IMAGE="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+
+            docker tag "wanderlust-$app:$GITHUB_SHA" "$REMOTE_IMAGE"
+            docker push "$REMOTE_IMAGE"
+
+            DIGEST="$(aws ecr describe-images \
+              --region "$AWS_REGION" \
+              --repository-name "$REPOSITORY" \
+              --image-ids "imageTag=$IMAGE_TAG" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)"
+
+            [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "::error::Missing valid ECR digest for $REPOSITORY"
+              exit 1
+            }
+
+            {
+              printf '\n### %s\n' "$app"
+              printf 'Tag: `%s`\n\n' "$REMOTE_IMAGE"
+              printf 'Deployment reference: `%s/%s@%s`\n' \
+                "$REGISTRY" "$REPOSITORY" "$DIGEST"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "Both images published and verified in ECR."
+
       - name: Record build results
         run: |
           {
