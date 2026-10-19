@@ -1,3 +1,47 @@
+<!-- wanderlust-devsecops-portfolio -->
+# Wanderlust DevSecOps Platform on AWS EKS
+
+A portfolio lab extending the Wanderlust application with security checks,
+container hardening, automated deployment and monitoring.
+
+## Verified results
+
+- GitHub Actions run #19 passed; build job duration: 3m10s.
+- Gitleaks, dependency audit, SonarQube Quality Gate and Trivy passed.
+- Container runtime smoke tests passed.
+- Images were published to ECR and deployed to EKS by immutable digest.
+- Backend, frontend, MongoDB and Redis were healthy.
+- Website and application health were verified.
+- Prometheus/Grafana monitoring and alert firing were demonstrated.
+
+## Implementation
+
+- Pipeline: `.github/workflows/build-images.yml`
+- Deployment: `scripts/deploy/eks.sh`
+- Kubernetes: `kubernetes/eks/`
+- Monitoring: `monitoring/`
+- Security exceptions: `docs/security/`
+
+AWS region: ap-southeast-2. Infrastructure was created through Console/CLI.
+Terraform examples from the original application were not used.
+Helm manages monitoring; application deployment uses Kubernetes manifests.
+
+## Limitations
+
+This is a lab, not a production-ready platform. Persistence restart,
+database restore and deployment rollback drills were not performed.
+Public HTTPS and external alert notifications were not verified.
+Selected Sonar findings, empty-list UI and cache invalidation remain open.
+AWS cleanup is pending verification.
+
+## Attribution
+
+Original application contributors retain credit for their work.
+This project adds DevSecOps, deployment and monitoring implementation.
+The existing LICENSE and original README are preserved below.
+
+---
+
 # Wanderlust - Your Ultimate Travel Blog 🌍✈️
 
 WanderLust is a simple MERN travel blog website ✈ This project is aimed to help people to contribute in open source, upskill in react and also master git.
