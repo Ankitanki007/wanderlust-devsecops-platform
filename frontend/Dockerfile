@@ -5,7 +5,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY index.html ./
+COPY vite.config.ts tsconfig.json tsconfig.node.json tsconfig.prod.json ./
+COPY postcss.config.js tailwind.config.js components.json ./
+COPY public/ ./public/
+COPY src/ ./src/
 
 ENV VITE_API_PATH=""
 RUN npm run build
