@@ -78,3 +78,16 @@ The existing [LICENSE](LICENSE) is retained.
 
 The [preserved earlier README](docs/upstream/README-original.md) contains
 historical project instructions and may describe a different toolchain.
+
+<!-- wanderlust-evidence -->
+## Project evidence
+
+![pipeline-success.png](docs/evidence/pipeline-success.png)
+
+![application.png](docs/evidence/application.png)
+
+![grafana-dashboard.png](docs/evidence/grafana-dashboard.png)
+
+![alert-firing.png](docs/evidence/alert-firing.png)
+
+Alert screenshot: controlled failure test.
